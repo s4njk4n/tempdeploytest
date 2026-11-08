@@ -16,6 +16,12 @@ const ABI=[{"anonymous": false, "inputs": [{"indexed": true, "internalType": "ad
 const NETS={50:{chainName:'XDC Network',rpcUrls:['https://rpc.plugin.global/xdcmainnet'],nativeCurrency:{name:'XDC',symbol:'XDC',decimals:18},blockExplorerUrls:['https://xdcscan.com']},
 51:{chainName:'XDC Apothem',rpcUrls:['https://rpc.plugin.global/xdcapothem'],nativeCurrency:{name:'TXDC',symbol:'TXDC',decimals:18},blockExplorerUrls:['https://testnet.xdcscan.com']}};
 const log=s=>{document.getElementById('log').textContent+='\n'+s};
+function detail(e){const bits=[e.shortMessage||e.message];
+  const inner=e.error||(e.info&&e.info.error)||(e.info&&e.info.payload&&null);
+  if(inner) bits.push('Details: '+(inner.message||JSON.stringify(inner)));
+  if(e.data) bits.push('Data: '+(typeof e.data==='string'?e.data:JSON.stringify(e.data)));
+  if(e.code) bits.push('Code: '+e.code);
+  return bits.join('\n');}
 const wallets=[];
 window.addEventListener('eip6963:announceProvider',e=>wallets.push(e.detail));
 window.dispatchEvent(new Event('eip6963:requestProvider'));
@@ -41,14 +47,20 @@ async function go(id){
     const p=new ethers.BrowserProvider(eth);
     const s=await p.getSigner();
     log('Deploying from '+await s.getAddress());
-    log('Step 3: approve the deploy in MetaMask...');
+    log('Step 3: preparing the deploy...');
     const f=new ethers.ContractFactory(ABI,BYTECODE,s);
-    const c=await f.deploy({type:0,gasPrice:ethers.parseUnits('0.3','gwei'),gasLimit:4600000});
+    const gp=BigInt(await p.send('eth_gasPrice',[])); const gasPrice=gp+gp/10n;
+    const dtx=await f.getDeployTransaction();
+    let gasLimit=4600000n;
+    try{const est=await p.estimateGas({...dtx,from:await s.getAddress()}); gasLimit=est+est/5n; log('Estimated gas: '+est);}catch(e){log('Gas estimate failed, using 4,600,000: '+detail(e));}
+    log('Gas price: '+ethers.formatUnits(gasPrice,'gwei')+' gwei. Max cost about '+ethers.formatEther(gasPrice*gasLimit)+' XDC.');
+    log('Approve the deploy in MetaMask...');
+    const c=await f.deploy({type:0,gasPrice,gasLimit});
     const tx=c.deploymentTransaction();
     log('Sent: '+tx.hash+'\nWaiting for confirmation...');
     const r=await tx.wait();
     log('\nDONE.\nfactory: \''+r.contractAddress+'\'\nfactoryBlock: '+r.blockNumber+'\n\nPut these two values in config.js under network '+id+'.');
-  }catch(e){log('Error: '+(e.shortMessage||e.message))}
+  }catch(e){log('Error: '+detail(e))}
 }
 document.getElementById('t').onclick=()=>go(51);
 document.getElementById('m').onclick=()=>go(50);
